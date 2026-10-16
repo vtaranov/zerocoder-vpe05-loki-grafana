@@ -1,0 +1,79 @@
+name: vpe05-monitoring
+
+x-runtime: &runtime
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "5m"
+      max-file: "2"
+
+services:
+  loki:
+    <<: *runtime
+    image: grafana/loki:3.7.8
+    command: ["-config.file=/etc/loki/config.yaml"]
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./loki/config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    environment:
+      GOMEMLIMIT: 400MiB
+    mem_limit: 512m
+    cpus: 0.50
+    pids_limit: 128
+
+  grafana:
+    <<: *runtime
+    image: grafana/grafana:13.2.4
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Run python3 scripts/init_env.py first}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/vpe05.json
+      GF_DATE_FORMATS_DEFAULT_TIMEZONE: Europe/Moscow
+      GOMEMLIMIT: 256MiB
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      loki:
+        condition: service_started
+    mem_limit: 384m
+    cpus: 0.50
+    pids_limit: 128
+
+  demo-app:
+    <<: *runtime
+    build: .
+    image: vpe05-demo:1.0
+    ports:
+      - "${APP_PORT:-18085}:8080"
+    environment:
+      LOKI_URL: http://loki:3100/loki/api/v1/push
+      LOG_INTERVAL_SECONDS: "15"
+    depends_on:
+      loki:
+        condition: service_started
+    mem_limit: 96m
+    cpus: 0.20
+    pids_limit: 64
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid
+
+volumes:
+  loki-data:
+  grafana-data:

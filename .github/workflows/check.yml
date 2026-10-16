@@ -1,0 +1,33 @@
+name: Verify monitoring stack
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Unit and HTTP tests
+        run: python -m unittest discover -s tests -v
+      - name: Create local credentials
+        run: python scripts/init_env.py
+      - name: Validate Compose
+        run: docker compose config --quiet
+      - name: Start the complete stack
+        run: docker compose up -d --build
+      - name: Verify actual Loki ingestion, Grafana data source, dashboard and LogQL
+        run: python scripts/verify_stack.py
+      - name: Verify persistence across restart
+        run: python scripts/verify_restart.py
+      - name: Debug failed run
+        if: failure()
+        run: docker compose ps -a && docker compose logs --tail=100
+      - name: Cleanup runner
+        if: always()
+        run: docker compose down -v
